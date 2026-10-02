@@ -15,7 +15,9 @@
 set -euo pipefail
 
 OWNER=${OWNER:-${GITHUB_REPOSITORY_OWNER:?set OWNER}}
-AUTH=${PUSH_TOKEN:+x-access-token:$PUSH_TOKEN@}
+# KEY_DIR holds one write deploy key per target repo, named after the repo.
+# Without it, pushes go over HTTPS with whatever credentials git already has.
+KEY_DIR=${KEY_DIR:-}
 DRY=${DRY_RUN:-}
 
 MPC_UPSTREAM=https://github.com/clsid2/mpc-hc.git
@@ -24,10 +26,22 @@ LAV_UPSTREAM=https://github.com/clsid2/LAVFilters.git
 LAV_PATH=src/thirdparty/LAVFilters/src
 GITEA='https://gitea\.1f0\.de/LAV/([A-Za-z0-9_-]+)(\.git)?'
 
-gh_url()   { echo "https://github.com/$OWNER/$1.git"; }
-push_url() { echo "https://${AUTH}github.com/$OWNER/$1.git"; }
-run()      { if [ -n "$DRY" ]; then echo "DRY RUN: ${*//$AUTH/}"; else "$@"; fi; }
-fetch()    { git fetch -q --no-tags "$@"; }
+gh_url() { echo "https://github.com/$OWNER/$1.git"; }
+fetch()  { git fetch -q --no-tags "$@"; }
+
+# push REPO ARGS... - push to github.com/OWNER/REPO with that repo's own key.
+push() {
+    local repo=$1
+    shift
+    if [ -n "$DRY" ]; then echo "DRY RUN: push $repo $*"; return; fi
+    if [ -z "$KEY_DIR" ]; then git push -q "$(gh_url "$repo")" "$@"; return; fi
+    if [ ! -s "$KEY_DIR/$repo" ]; then
+        echo "no deploy key for $repo: add one with write access and a DEPLOY_KEY_ secret" >&2
+        exit 1
+    fi
+    GIT_SSH_COMMAND="ssh -i $KEY_DIR/$repo -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+        git push -q "git@github.com:$OWNER/$repo.git" "$@"
+}
 
 rm -rf work
 git init -q work
@@ -86,7 +100,7 @@ for name in $(git config --file "$lavmods" --name-only --get-regexp '^submodule\
         echo "$repo: pinned $pin is not on any gitea branch or tag" >&2
         exit 1
     fi
-    run git push -q --force --prune "$(push_url "$repo")" \
+    push "$repo" --force --prune \
         "refs/mirror/$repo/heads/*:refs/heads/*" "refs/mirror/$repo/tags/*:refs/tags/*"
     echo "mirrored $repo (pin $pin)"
 done
@@ -96,7 +110,7 @@ L=$(derive LAVFilters github-submodules "$X" "s#$GITEA#https://github.com/$OWNER
 D=$(derive mpc-hc-github develop "$U" \
     "s#https://github\.com/clsid2/LAVFilters(\.git)?#https://github.com/$OWNER/LAVFilters.git#" \
     "$LAV_PATH" "$L")
-run git push -q "$(push_url LAVFilters)" "$L:refs/heads/github-submodules"
-run git push -q "$(push_url mpc-hc-github)" "$D:refs/heads/develop"
+push LAVFilters "$L:refs/heads/github-submodules"
+push mpc-hc-github "$D:refs/heads/develop"
 echo "LAVFilters github-submodules = $L"
 echo "mpc-hc-github develop       = $D"

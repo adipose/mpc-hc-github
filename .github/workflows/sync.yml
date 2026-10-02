@@ -18,10 +18,23 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      # One write deploy key per target repo, so each key can push to exactly
+      # one repo. A new gitea submodule needs its own mirror repo, deploy key
+      # and DEPLOY_KEY_ secret before the sync can push to it.
+      - name: Install deploy keys
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$K_MPC" > "$RUNNER_TEMP/keys/mpc-hc-github"
+          printf '%s\n' "$K_LAV" > "$RUNNER_TEMP/keys/LAVFilters"
+          printf '%s\n' "$K_BLURAY" > "$RUNNER_TEMP/keys/libbluray"
+          printf '%s\n' "$K_QSD" > "$RUNNER_TEMP/keys/qsdecoder"
+        env:
+          K_MPC: ${{ secrets.DEPLOY_KEY_MPC_HC_GITHUB }}
+          K_LAV: ${{ secrets.DEPLOY_KEY_LAVFILTERS }}
+          K_BLURAY: ${{ secrets.DEPLOY_KEY_LIBBLURAY }}
+          K_QSD: ${{ secrets.DEPLOY_KEY_QSDECODER }}
       - name: Sync from upstream
-        run: bash sync.sh
+        run: KEY_DIR="$RUNNER_TEMP/keys" bash sync.sh
         env:
           OWNER: ${{ github.repository_owner }}
-          # Fine-grained token with Contents: read and write on this repo,
-          # LAVFilters, libbluray and qsdecoder.
-          PUSH_TOKEN: ${{ secrets.SYNC_TOKEN }}
