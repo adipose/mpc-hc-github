@@ -1,0 +1,27 @@
+name: sync
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync from upstream
+        run: bash sync.sh
+        env:
+          OWNER: ${{ github.repository_owner }}
+          # Fine-grained token with Contents: read and write on this repo,
+          # LAVFilters, libbluray and qsdecoder.
+          PUSH_TOKEN: ${{ secrets.SYNC_TOKEN }}
