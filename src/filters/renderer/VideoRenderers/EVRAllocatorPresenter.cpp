@@ -28,6 +28,7 @@
 #include "IMPCVideoDecFilter.h"
 #include "Utils.h"
 #include "Variables.h"
+#include "HLGInput.h"
 
 #if (0)     // Set to 1 to activate EVR traces
 #define TRACE_EVR   TRACE
@@ -688,6 +689,11 @@ HRESULT CEVRAllocatorPresenter::IsMediaTypeSupported(IMFMediaType* pMixerType)
     return hr;
 }
 
+bool CEVRAllocatorPresenter::InputPinIsHLGNow()
+{
+    return InputPinIsHLG(m_pOuterEVR);
+}
+
 HRESULT CEVRAllocatorPresenter::CreateOptimalOutputType(IMFMediaType* pMixerProposedType, IMFMediaType* pMixerInputType, IMFMediaType** ppType)
 {
     HRESULT hr;
@@ -724,6 +730,11 @@ HRESULT CEVRAllocatorPresenter::CreateOptimalOutputType(IMFMediaType* pMixerProp
     }
 
     pOptimalMediaType->SetUINT32(MF_MT_PAN_SCAN_ENABLED, 0);
+
+    // HLG input: the rendering engine converts it to SDR, from the very first frame
+    // (the decoder often signals HLG only in a format change after the first frames).
+    m_bHLGInput = MixerTypeIsHLG(pMixerInputType);
+    m_bHLGPinCheck = !m_bHLGInput;
 
     const CRenderersSettings& r = GetRenderersSettings();
 
