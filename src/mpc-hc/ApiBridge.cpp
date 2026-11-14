@@ -145,11 +145,11 @@ void CApiBridge::ProcessAPICommand(HWND hSender, COPYDATASTRUCT* pCDS)
             if (m_frame.GetMediaState() == State_Running) {
                 m_frame.MediaControlPause(true);
             }
-            if (m_frame.CanSendToYoutubeDL(fn)) {
-                if (m_frame.ProcessYoutubeDLURL(fn, false)) {
+            if (m_frame.m_cmdline.CanSendToYoutubeDL(fn)) {
+                if (m_frame.m_cmdline.ProcessYoutubeDLURL(fn, false)) {
                     m_frame.PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
                     return;
-                } else if (m_frame.IsOnYDLWhitelist(fn)) {
+                } else if (m_frame.m_cmdline.IsOnYDLWhitelist(fn)) {
                     m_frame.m_closingmsg = L"Failed to extract stream URL with yt-dlp/youtube-dl";
                     m_frame.m_wndStatusBar.SetStatusMessage(m_frame.m_closingmsg);
                     return;
@@ -176,10 +176,10 @@ void CApiBridge::ProcessAPICommand(HWND hSender, COPYDATASTRUCT* pCDS)
             break;
         case CMD_ADDTOPLAYLIST:
             fn = CString((LPCWSTR)pCDS->lpData);
-            if (m_frame.CanSendToYoutubeDL(fn)) {
-                if (m_frame.ProcessYoutubeDLURL(fn, true)) {
+            if (m_frame.m_cmdline.CanSendToYoutubeDL(fn)) {
+                if (m_frame.m_cmdline.ProcessYoutubeDLURL(fn, true)) {
                     return;
-                } else if (m_frame.IsOnYDLWhitelist(fn)) {
+                } else if (m_frame.m_cmdline.IsOnYDLWhitelist(fn)) {
                     m_frame.m_closingmsg = L"Failed to extract stream URL with yt-dlp/youtube-dl";
                     m_frame.m_wndStatusBar.SetStatusMessage(m_frame.m_closingmsg);
                     return;
@@ -299,7 +299,7 @@ void CApiBridge::ProcessAPICommand(HWND hSender, COPYDATASTRUCT* pCDS)
             m_frame.m_wndToolBar.m_volctrl.DecreaseVolume();
             break;
 		case CMD_SHADER_TOGGLE :
-			m_frame.OnShaderToggle1();
+			m_frame.m_shaders.OnShaderToggle1();
 			break;
         case CMD_CLOSEAPP:
             m_frame.PostMessage(WM_CLOSE);

@@ -319,8 +319,6 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
     ON_UPDATE_COMMAND_UI(ID_EDL_NEWCLIP, OnUpdateEDLNewClip)
     ON_COMMAND(ID_EDL_SAVE, OnEDLSave)
     ON_UPDATE_COMMAND_UI(ID_EDL_SAVE, OnUpdateEDLSave)
-    ON_COMMAND(ID_VIEW_DEBUGSHADERS, OnViewDebugShaders)
-    ON_UPDATE_COMMAND_UI(ID_VIEW_DEBUGSHADERS, OnUpdateViewDebugShaders)
     ON_COMMAND(ID_COLOR_CONTROLS, OnViewColorControls)
     ON_UPDATE_COMMAND_UI(ID_COLOR_CONTROLS, OnUpdateViewColorControls)
     ON_COMMAND(ID_VIEW_PRESETS_MINIMAL, OnViewMinimal)
@@ -424,10 +422,6 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 
     ON_COMMAND(ID_VIEW_VSYNCOFFSET_INCREASE, OnViewVSyncOffsetIncrease)
     ON_COMMAND(ID_VIEW_VSYNCOFFSET_DECREASE, OnViewVSyncOffsetDecrease)
-	ON_UPDATE_COMMAND_UI(ID_PRESIZE_SHADERS_TOGGLE, OnUpdateShaderToggle1)
-	ON_COMMAND(ID_PRESIZE_SHADERS_TOGGLE, OnShaderToggle1)
-	ON_UPDATE_COMMAND_UI(ID_POSTSIZE_SHADERS_TOGGLE, OnUpdateShaderToggle2)
-	ON_COMMAND(ID_POSTSIZE_SHADERS_TOGGLE, OnShaderToggle2)
     ON_UPDATE_COMMAND_UI(ID_VIEW_OSD_DISPLAY_TIME, OnUpdateViewOSDDisplayTime)
     ON_COMMAND(ID_VIEW_OSD_DISPLAY_TIME, OnViewOSDDisplayTime)
     ON_UPDATE_COMMAND_UI(ID_VIEW_OSD_SHOW_FILENAME, OnUpdateViewOSDShowFileName)
@@ -461,10 +455,6 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
     ON_COMMAND(ID_FILTERS_COPY_TO_CLIPBOARD, OnPlayFiltersCopyToClipboard)
     ON_COMMAND_RANGE(ID_FILTERS_SUBITEM_START, ID_FILTERS_SUBITEM_END, OnPlayFilters)
     ON_UPDATE_COMMAND_UI_RANGE(ID_FILTERS_SUBITEM_START, ID_FILTERS_SUBITEM_END, OnUpdatePlayFilters)
-    ON_COMMAND(ID_SHADERS_SELECT, OnPlayShadersSelect)
-    ON_COMMAND(ID_SHADERS_PRESET_NEXT, OnPlayShadersPresetNext)
-    ON_COMMAND(ID_SHADERS_PRESET_PREV, OnPlayShadersPresetPrev)
-    ON_COMMAND_RANGE(ID_SHADERS_PRESETS_START, ID_SHADERS_PRESETS_END, OnPlayShadersPresets)
     ON_COMMAND_RANGE(ID_AUDIO_SUBITEM_START, ID_AUDIO_SUBITEM_END, OnPlayAudio)
     ON_COMMAND_RANGE(ID_VIDEO_STREAMS_SUBITEM_START, ID_VIDEO_STREAMS_SUBITEM_END, OnPlayVideoStreams)
     ON_COMMAND_RANGE(ID_FILTERSTREAMS_SUBITEM_START, ID_FILTERSTREAMS_SUBITEM_END, OnPlayFiltersStreams)
@@ -649,7 +639,7 @@ void CMainFrame::EventCallback(MpcEvent ev)
         case MpcEvent::SHADER_SELECTION_CHANGED:
         case MpcEvent::SHADER_PRERESIZE_SELECTION_CHANGED:
         case MpcEvent::SHADER_POSTRESIZE_SELECTION_CHANGED:
-            SetShaders(m_bToggleShader, m_bToggleShaderScreenSpace);
+            m_shaders.SetShaders(m_shaders.m_bToggleShader, m_shaders.m_bToggleShaderScreenSpace);
             break;
         case MpcEvent::DISPLAY_MODE_AUTOCHANGING:
             if (GetLoadState() == MLS::LOADED && GetMediaState() == State_Running && s.autoChangeFSMode.uDelay) {
@@ -713,8 +703,6 @@ CMainFrame::CMainFrame()
     , m_iReloadAudioIdx(-1)
     , m_iReloadSubIdx(-1)
     , m_bRememberFilePos(false)
-    , m_dwLastRun(0)
-    , m_nLastAppendSelectionIndex(0)
     , m_bBuffering(false)
     , m_fLiveWM(false)
     , m_rtDurationOverride(-1)
@@ -725,6 +713,8 @@ CMainFrame::CMainFrame()
     , m_geometry(*this)
     , m_api(*this)
     , m_subs(*this)
+    , m_shaders(*this)
+    , m_cmdline(*this)
     , m_iPlaybackMode(PM_NONE)
     , m_lCurrentChapter(0)
     , m_lChapterStartTime(0xFFFFFFFF)
@@ -786,9 +776,6 @@ CMainFrame::CMainFrame()
     , m_iStreamPosPollerInterval(100)
     , currentAudioLang(_T(""))
     , currentSubLang(_T(""))
-    , m_bToggleShader(false)
-    , m_bToggleShaderScreenSpace(false)
-    , m_sydlLastProcessURL()
     , m_bUseSeekPreview(false)
     , queuedSeek({0,0,false})
     , lastSeekStart(0)
@@ -1014,8 +1001,8 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
         }
     }
 
-    m_bToggleShader = s.bToggleShader;
-    m_bToggleShaderScreenSpace = s.bToggleShaderScreenSpace;
+    m_shaders.m_bToggleShader = s.bToggleShader;
+    m_shaders.m_bToggleShaderScreenSpace = s.bToggleShaderScreenSpace;
     OpenSetupWindowTitle(true);
 
     WTSRegisterSessionNotification();
@@ -1103,8 +1090,8 @@ void CMainFrame::OnDestroy()
     ShowTrayIcon(false);
     m_dropTarget.Revoke();
 
-    if (m_pDebugShaders && IsWindow(m_pDebugShaders->m_hWnd)) {
-        VERIFY(m_pDebugShaders->DestroyWindow());
+    if (m_shaders.m_pDebugShaders && IsWindow(m_shaders.m_pDebugShaders->m_hWnd)) {
+        VERIFY(m_shaders.m_pDebugShaders->DestroyWindow());
     }
 
     if (m_pColorControls && IsWindow(m_pColorControls->m_hWnd)) {
@@ -1333,8 +1320,8 @@ void CMainFrame::OnClose()
 
     ASSERT(GetCurrentThreadId() == AfxGetApp()->m_nThreadID);
 
-    s.bToggleShader = m_bToggleShader;
-    s.bToggleShaderScreenSpace = m_bToggleShaderScreenSpace;
+    s.bToggleShader = m_shaders.m_bToggleShader;
+    s.bToggleShaderScreenSpace = m_shaders.m_bToggleShaderScreenSpace;
     s.dZoomX = m_geometry.m_ZoomX;
     s.dZoomY = m_geometry.m_ZoomY;
 
@@ -1684,6 +1671,9 @@ BOOL CMainFrame::OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO*
         return TRUE;
     }
     if (m_subs.OnCmdMsg(nID, nCode, pExtra, pHandlerInfo)) {
+        return TRUE;
+    }
+    if (m_shaders.OnCmdMsg(nID, nCode, pExtra, pHandlerInfo)) {
         return TRUE;
     }
 
@@ -3931,7 +3921,7 @@ void CMainFrame::OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu) 
             m_favorites.SetupRecentFilesSubMenu();
             pSubMenu = &m_recentFilesMenu;
         } else if (itemID == ID_SHADERS) {
-            if (SetupShadersSubMenu()) {
+            if (m_shaders.SetupShadersSubMenu()) {
                 pPopupMenu->EnableMenuItem(ID_SHADERS, MF_BYPOSITION | MF_ENABLED);
             } else {
                 pPopupMenu->EnableMenuItem(ID_SHADERS, MF_BYPOSITION | MF_GRAYED);
@@ -4424,10 +4414,10 @@ LRESULT CMainFrame::OnFilePostOpenmedia(WPARAM wParam, LPARAM lParam)
 
     // set shader selection
     if (m_graph.m_pCAP || m_graph.m_pCAP2) {
-        bool pre = m_bToggleShader && s.m_Shaders.GetCurrentPreset().GetPreResize().size() > 0;
-        bool post = m_bToggleShaderScreenSpace && s.m_Shaders.GetCurrentPreset().GetPostResize().size() > 0;
+        bool pre = m_shaders.m_bToggleShader && s.m_Shaders.GetCurrentPreset().GetPreResize().size() > 0;
+        bool post = m_shaders.m_bToggleShaderScreenSpace && s.m_Shaders.GetCurrentPreset().GetPostResize().size() > 0;
         if (pre || post) {
-            SetShaders(pre, post);
+            m_shaders.SetShaders(pre, post);
         }
     }
 
@@ -4669,7 +4659,7 @@ LRESULT CMainFrame::OnOpenMediaFailed(WPARAM wParam, LPARAM lParam)
 
     if (wParam == PM_FILE && m_OpenMediaFailedCount < 5) {
         CPlaylistItem pli = CPlaylistItem(true);
-        if (m_wndPlaylistBar.GetCur(pli) && pli.m_bYoutubeDL && m_sydlLastProcessURL != pli.m_ydlSourceURL) {
+        if (m_wndPlaylistBar.GetCur(pli) && pli.m_bYoutubeDL && m_cmdline.m_sydlLastProcessURL != pli.m_ydlSourceURL) {
             OpenCurPlaylistItem(0, true);  // Try to reprocess if failed first time.
             return 0;
         }
@@ -5038,13 +5028,13 @@ void CMainFrame::OnFileOpenmedia()
 
     CAtlList<CString> filenames;
 
-    if (CanSendToYoutubeDL(dlg.GetFileNames().GetHead())) {
-        if (ProcessYoutubeDLURL(dlg.GetFileNames().GetHead(), dlg.GetAppendToPlaylist())) {
+    if (m_cmdline.CanSendToYoutubeDL(dlg.GetFileNames().GetHead())) {
+        if (m_cmdline.ProcessYoutubeDLURL(dlg.GetFileNames().GetHead(), dlg.GetAppendToPlaylist())) {
             if (!dlg.GetAppendToPlaylist()) {
                 OpenCurPlaylistItem();
             }
             return;
-        } else if (IsOnYDLWhitelist(dlg.GetFileNames().GetHead())) {
+        } else if (m_cmdline.IsOnYDLWhitelist(dlg.GetFileNames().GetHead())) {
             m_closingmsg = L"Failed to extract stream URL with yt-dlp/youtube-dl";
             m_wndStatusBar.SetStatusMessage(m_closingmsg);
             // don't bother trying to open this website URL directly
@@ -5132,381 +5122,12 @@ BOOL CMainFrame::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCDS)
         }
     }
 
-    if (m_capture.m_bScanDlgOpened) {
-        return FALSE;
-    }
-
-    DWORD len = *((DWORD*)pCDS->lpData);
-    TCHAR* pBuff = (TCHAR*)((DWORD*)pCDS->lpData + 1);
-    TCHAR* pBuffEnd = pBuff + (pCDS->cbData - sizeof(DWORD)) / sizeof(TCHAR);
-
-    CAtlList<CString> cmdln;
-
-    while (len-- > 0 && pBuff < pBuffEnd) {
-        // the sender is another process, so do not trust it to terminate the last string
-        size_t n = wcsnlen(pBuff, pBuffEnd - pBuff);
-        CString str(pBuff, (int)n);
-        pBuff += n + 1;
-
-        cmdln.AddTail(str);
-    }
-
-    QueueCommandLine(cmdln);
-
-    return TRUE;
-}
-
-// Queue a command line and return at once. Everything that acts on it probes the filesystem,
-// and a path on an unreachable share blocks that for half a minute. While it ran inside the
-// WM_COPYDATA handler the window was not pumping messages, so Windows marked it as not
-// responding and the other instances redirecting to us gave up and each opened a window of
-// their own (#4149). The arrival time travels with the command line, so a slow open cannot
-// make the next file of the same Explorer selection look like a new one. The Explorer drop
-// target (ShellDropTarget.cpp) comes in here too, with Explorer itself waiting on the return.
-void CMainFrame::QueueCommandLine(const CAtlList<CString>& cmdln)
-{
-    m_pendingCommandLines.emplace_back();
-    PendingCommandLine& pending = m_pendingCommandLines.back();
-    pending.tArrived = GetTickCount64();
-    pending.cmdln.AddTailList(&cmdln);
-    VERIFY(PostMessage(WM_MPC_CMDLINE));
+    return m_cmdline.ReceiveCommandLine(pCDS);
 }
 
 LRESULT CMainFrame::OnCommandLineReceived(WPARAM wParam, LPARAM lParam)
 {
-    if (m_bProcessingCommandLine) {
-        // Re-entered through a nested message pump: opening and closing the graph both pump
-        // posted messages. The call already running drains the queue before it returns.
-        return 0;
-    }
-
-    m_bProcessingCommandLine = true;
-    while (!m_pendingCommandLines.empty()) {
-        PendingCommandLine& pending = m_pendingCommandLines.front();
-        ProcessCommandLine(pending.cmdln, pending.tArrived);
-        m_pendingCommandLines.pop_front();
-    }
-    m_bProcessingCommandLine = false;
-
-    return 0;
-}
-
-void CMainFrame::ProcessCommandLine(CAtlList<CString>& cmdln, ULONGLONG tArrived)
-{
-    // Re-checked because this now runs later than the message that carried the command line.
-    if (AfxGetMyApp()->m_fClosingState || m_capture.m_bScanDlgOpened) {
-        return;
-    }
-    {
-        auto pCmdln = std::make_shared<CAtlList<CString>>();
-        pCmdln->AddTailList(&cmdln);
-        // may add to the playlist rather than open, so it is never discarded
-        if (DeferIfNested(DeferredActionType::Other, [this, pCmdln, tArrived] { ProcessCommandLine(*pCmdln, tArrived); })) {
-            return;
-        }
-    }
-
-    CAppSettings& s = AfxGetAppSettings();
-
-    s.ParseCommandLine(cmdln);
-
-    if (s.nCLSwitches & CLSW_SLAVE) {
-        m_api.m_lastApiVolume = GetVolume();
-        m_api.m_lastApiMute = IsMuted() ? 1 : 0;
-        m_api.m_hostIntApiVersion = 0; // new host: integer channel unconfirmed until it says HELLO
-        m_api.SendAPICommand(CMD_CONNECT, L"%d", PtrToInt(GetSafeHwnd()));
-        s.nCLSwitches &= ~CLSW_SLAVE;
-    }
-
-    POSITION pos = s.slFilters.GetHeadPosition();
-    while (pos) {
-        CString fullpath = MakeFullPath(s.slFilters.GetNext(pos));
-
-        CLongPath tmp(fullpath);
-        tmp.RemoveFileSpec();
-        tmp.AddBackslash();
-        CString path = tmp;
-
-        WIN32_FIND_DATA fd;
-        ZeroMemory(&fd, sizeof(WIN32_FIND_DATA));
-        HANDLE hFind = FindFirstFile(fullpath, &fd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                    continue;
-                }
-
-                CFilterMapper2 fm2(false);
-                fm2.Register(path + fd.cFileName);
-                while (!fm2.m_filters.IsEmpty()) {
-                    if (FilterOverride* f = fm2.m_filters.RemoveTail()) {
-                        f->fTemporary = true;
-
-                        bool fFound = false;
-
-                        POSITION pos2 = s.m_filters.GetHeadPosition();
-                        while (pos2) {
-                            FilterOverride* f2 = s.m_filters.GetNext(pos2);
-                            if (f2->type == FilterOverride::EXTERNAL && !f2->path.CompareNoCase(f->path)) {
-                                fFound = true;
-                                break;
-                            }
-                        }
-
-                        if (!fFound) {
-                            CAutoPtr<FilterOverride> p(f);
-                            s.m_filters.AddHead(p);
-                        }
-                    }
-                }
-            } while (FindNextFile(hFind, &fd));
-
-            FindClose(hFind);
-        }
-    }
-
-    bool fSetForegroundWindow = false;
-
-    auto applyRandomizeSwitch = [&]() {
-        if (s.nCLSwitches & CLSW_RANDOMIZE) {
-            m_wndPlaylistBar.Randomize();
-            s.nCLSwitches &= ~CLSW_RANDOMIZE;
-        }
-    };
-
-    if ((s.nCLSwitches & CLSW_DVD) && !s.slFiles.IsEmpty()) {
-        if (!CloseMediaBeforeOpen()) {
-            return;
-        }
-        fSetForegroundWindow = true;
-
-        CAutoPtr<OpenDVDData> p(DEBUG_NEW OpenDVDData());
-        if (p) {
-            p->path = s.slFiles.GetHead();
-            p->subs.AddTailList(&s.slSubs);
-            m_wndPlaylistBar.OpenDVD(p->path);
-        }
-        // ToDo: open indirectly
-        OpenMedia(p);
-        s.nCLSwitches &= ~CLSW_DVD;
-    } else if (s.nCLSwitches & CLSW_CD) {
-        if (GetMediaState() == State_Running) {
-            MediaControlPause(true);
-        }
-        fSetForegroundWindow = true;
-
-        CAtlList<CString> sl;
-        if (!s.slFiles.IsEmpty()) {
-            GetOpticalDiskType(s.slFiles.GetHead()[0], sl);
-        } else {
-            CString dir;
-            dir.ReleaseBufferSetLength(GetCurrentDirectory(2048, dir.GetBuffer(2048)));
-
-            GetOpticalDiskType(dir[0], sl);
-
-            for (TCHAR drive = _T('A'); sl.IsEmpty() && drive <= _T('Z'); drive++) {
-                GetOpticalDiskType(drive, sl);
-            }
-        }
-
-        m_wndPlaylistBar.Open(sl, true);
-        applyRandomizeSwitch();
-        s.nCLSwitches &= ~CLSW_CD;
-        PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
-    } else if (s.nCLSwitches & (CLSW_DEVICE | CLSW_DVBSCAN)) {
-        // OnFileOpendevice shows the capture options page and returns when no
-        // device is configured. Interactively that is a prompt; for a headless
-        // run it is a modal nobody can answer, and the process would sit there
-        // with no device, no scan and nothing to time out. Check the same
-        // condition first and fail the run instead.
-        if ((s.nCLSwitches & CLSW_DVBSCAN) && s.iDefaultCaptureDevice == 0 &&
-                s.strAnalogVideo == L"dummy" && s.strAnalogAudio == L"dummy") {
-            TRACE(_T("/dvbscan: no capture device configured, nothing to scan\n"));
-            s.nCLSwitches &= ~CLSW_DVBSCAN;
-            AfxGetMyApp()->m_nExitCode = 1;
-            PostMessage(WM_CLOSE);
-        } else {
-            // /dvbscan implies opening the capture device, because DoTunerScan
-            // only runs in PM_DIGITAL_CAPTURE. CLSW_DVBSCAN is deliberately
-            // left set: OnFilePostOpenmedia consumes it once the device is up.
-            PostMessage(WM_COMMAND, ID_FILE_OPENDEVICE);
-            s.nCLSwitches &= ~CLSW_DEVICE;
-        }
-    } else if (!s.slFiles.IsEmpty()) {
-        CAtlList<CString> sl;
-        sl.AddTailList(&s.slFiles);
-
-        PathUtils::ParseDirs(sl);
-
-        bool fMulti = sl.GetCount() > 1;
-        if (!fMulti) {
-            sl.AddTailList(&s.slDubs);
-        }
-
-        if (m_disc.OpenBD(s.slFiles.GetHead())) {
-            // Nothing more to do
-        } else if (!fMulti && CLongPath(s.slFiles.GetHead() + _T("\\VIDEO_TS")).IsDirectory()) {
-            fSetForegroundWindow = true;
-
-            if (GetMediaState() == State_Running) {
-                MediaControlPause(true);
-            }
-
-            CAutoPtr<OpenDVDData> p(DEBUG_NEW OpenDVDData());
-            if (p) {
-                p->path = s.slFiles.GetHead();
-                p->subs.AddTailList(&s.slSubs);
-                m_wndPlaylistBar.OpenDVD(p->path);
-            }
-            // ToDo: open indirectly
-            OpenMedia(p);
-        } else {
-            // When the command line reached us, not when we got round to acting on it: an open
-            // that took a long time must not make the next file of the same selection, which
-            // arrived while we were busy, look like the start of a new one.
-            const ULONGLONG tcnow = tArrived;
-            // Opening a multi-file selection in Explorer spawns one process per file. Those arrive here in
-            // arbitrary order, so the entries added by the second and later ones are sorted back into place.
-            bool bSameSelection = m_dwLastRun && ((tcnow - m_dwLastRun) < s.iRedirectOpenToAppendThreshold);
-            if (bSameSelection) {
-                s.nCLSwitches |= CLSW_ADD;
-            }
-            m_dwLastRun = tcnow;
-            bool bRandomize = !!(s.nCLSwitches & CLSW_RANDOMIZE);
-
-            if ((s.nCLSwitches & CLSW_ADD) && !IsPlaylistEmpty()) {
-                if (!bSameSelection) { // a new selection starts at the current end of the playlist
-                    m_nLastAppendSelectionIndex = (int)m_wndPlaylistBar.GetCount();
-                }
-
-                if (!fMulti && sl.GetCount() > 1) {
-                    // video + dub, appended as one entry like the open path below (#4224)
-                    m_wndPlaylistBar.Append(sl, false, &s.slSubs);
-                } else {
-                    POSITION pos2 = sl.GetHeadPosition();
-                    while (pos2) {
-                        CString fn = sl.GetNext(pos2);
-                        if (!CanSendToYoutubeDL(fn) || !ProcessYoutubeDLURL(fn, true)) {
-                            CAtlList<CString> sl2;
-                            sl2.AddHead(fn);
-                            m_wndPlaylistBar.Append(sl2, false, &s.slSubs);
-                        }
-                    }
-                }
-
-                applyRandomizeSwitch();
-
-                if (s.nCLSwitches & (CLSW_OPEN | CLSW_PLAY)) {
-                    m_wndPlaylistBar.SetLast();
-                    if ((s.nCLSwitches & CLSW_STARTVALID) && s.rtStart > 0 || s.abRepeat) {
-                        m_reloadFilename = m_wndPlaylistBar.GetCurFileName();
-                        m_rtReloadPos = s.rtStart;
-                        reloadABRepeat = s.abRepeat;
-                        m_iReloadAudioIdx = -1;
-                        m_iReloadSubIdx = -1;
-                    }
-                    PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
-                }
-
-                // Done last so that it does not interfere with the item selected above. Sorting only moves
-                // list nodes around, so the playlist position stays on the same item.
-                if (bSameSelection && !bRandomize) {
-                    m_wndPlaylistBar.SortByPathFrom(m_nLastAppendSelectionIndex);
-                }
-            } else {
-                fSetForegroundWindow = true;
-                // The playlist gets replaced below and its first item starts playing. The rest of
-                // the selection is sorted in under it, so the playing item stays on top: sorting
-                // from 0 moved it into the middle and everything sorted before it never played.
-                m_nLastAppendSelectionIndex = 1;
-
-                if (GetMediaState() == State_Running) {
-                    MediaControlPause(true);
-                }
-
-                if (fMulti || sl.GetCount() == 1) {
-                    bool first = true;
-                    POSITION pos2 = sl.GetHeadPosition();
-                    while (pos2) {
-                        CString fn = sl.GetNext(pos2);
-                        if (!CanSendToYoutubeDL(fn) || !ProcessYoutubeDLURL(fn, !first, false)) {
-                            CAtlList<CString> sl2;
-                            sl2.AddHead(fn);
-                            if (first) {
-                                m_wndPlaylistBar.Open(sl2, false, &s.slSubs);
-                            } else {
-                                m_wndPlaylistBar.Append(sl2, false, &s.slSubs);
-                            }
-                        }
-                        first = false;
-                    }
-                } else {
-                    // video + dub
-                    m_wndPlaylistBar.Open(sl, false, &s.slSubs);
-                }
-
-                applyRandomizeSwitch();
-                if (sl.GetCount() != 1 || !IsPlaylistFile(sl.GetHead())) { //playlists already set first pos (or saved pos)
-                    m_wndPlaylistBar.SetFirst();
-                }
-
-                if ((s.nCLSwitches & CLSW_STARTVALID) && s.rtStart > 0 || s.abRepeat) {
-                    m_reloadFilename = m_wndPlaylistBar.GetCurFileName();
-                    m_rtReloadPos = s.rtStart;
-                    reloadABRepeat = s.abRepeat;
-                    m_iReloadAudioIdx = -1;
-                    m_iReloadSubIdx = -1;
-                }
-                PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
-
-                s.nCLSwitches &= ~CLSW_STARTVALID;
-                s.rtStart = 0;
-            }
-            s.nCLSwitches &= ~CLSW_ADD;
-        }
-    } else if ((s.nCLSwitches & CLSW_PLAY) && !IsPlaylistEmpty()) {
-        if ((s.nCLSwitches & CLSW_STARTVALID) && s.rtStart > 0 || s.abRepeat) {
-            m_reloadFilename = m_wndPlaylistBar.GetCurFileName();
-            m_rtReloadPos = s.rtStart;
-            reloadABRepeat = s.abRepeat;
-            m_iReloadAudioIdx = -1;
-            m_iReloadSubIdx = -1;
-        }
-        PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
-    } else {
-        applyRandomizeSwitch();
-    }
-
-    if (s.nCLSwitches & CLSW_PRESET1) {
-        SendMessage(WM_COMMAND, ID_VIEW_PRESETS_MINIMAL);
-        s.nCLSwitches &= ~CLSW_PRESET1;
-    } else if (s.nCLSwitches & CLSW_PRESET2) {
-        SendMessage(WM_COMMAND, ID_VIEW_PRESETS_COMPACT);
-        s.nCLSwitches &= ~CLSW_PRESET2;
-    } else if (s.nCLSwitches & CLSW_PRESET3) {
-        SendMessage(WM_COMMAND, ID_VIEW_PRESETS_NORMAL);
-        s.nCLSwitches &= ~CLSW_PRESET3;
-    } else if (s.nCLSwitches & CLSW_PRESET4) {
-        SendMessage(WM_COMMAND, ID_VIEW_PRESETS_CUSTOM);
-        s.nCLSwitches &= ~CLSW_PRESET4;
-    }
-    if (s.nCLSwitches & CLSW_VOLUME) {
-        if (IsMuted()) {
-            SendMessage(WM_COMMAND, ID_VOLUME_MUTE);
-        }
-        m_wndToolBar.SetVolume(s.nCmdVolume);
-        s.nCLSwitches &= ~CLSW_VOLUME;
-    }
-    if (s.nCLSwitches & CLSW_MUTE) {
-        if (!IsMuted()) {
-            SendMessage(WM_COMMAND, ID_VOLUME_MUTE);
-        }
-        s.nCLSwitches &= ~CLSW_MUTE;
-    }
-
-    if (fSetForegroundWindow && !(s.nCLSwitches & CLSW_NOFOCUS)) {
-        SetForegroundWindow();
-    }
+    return m_cmdline.OnCommandLineReceived(wParam, lParam);
 }
 
 int CALLBACK BrowseCallbackProc(HWND hwnd, UINT uMsg, LPARAM lp, LPARAM pData)
@@ -5841,16 +5462,16 @@ void CMainFrame::OnDropFiles(CAtlList<CStringW>& slFiles, DROPEFFECT dropEffect)
     }
 
     // load http url with youtube-dl, if available
-    if (CanSendToYoutubeDL(slFiles.GetHead())) {
+    if (m_cmdline.CanSendToYoutubeDL(slFiles.GetHead())) {
         if (!CloseMediaBeforeOpen()) {
             return;
         }
-        if (ProcessYoutubeDLURL(slFiles.GetHead(), bAppend)) {
+        if (m_cmdline.ProcessYoutubeDLURL(slFiles.GetHead(), bAppend)) {
             if (!bAppend) {
                 PostMessage(WM_MPC_OPENCURPLAYLIST, 0, 0);
             }
             return;
-        } else if (IsOnYDLWhitelist(slFiles.GetHead())) {
+        } else if (m_cmdline.IsOnYDLWhitelist(slFiles.GetHead())) {
             m_closingmsg = L"Failed to extract stream URL with yt-dlp/youtube-dl";
             m_wndStatusBar.SetStatusMessage(m_closingmsg);
             // don't bother trying to open this website URL directly
@@ -5908,7 +5529,7 @@ void CMainFrame::OnFileSaveAs()
     }
 
     if (pli.m_bYoutubeDL && !pli.m_ydlSourceURL.IsEmpty()) {
-        DownloadWithYoutubeDL(pli.m_ydlSourceURL, out);
+        m_cmdline.DownloadWithYoutubeDL(pli.m_ydlSourceURL, out);
         return;
     }
 
@@ -6764,60 +6385,6 @@ void CMainFrame::OnViewOSDShowFileName()
     }
 }
 
-void CMainFrame::OnUpdateShaderToggle1(CCmdUI* pCmdUI)
-{
-	if (AfxGetAppSettings().m_Shaders.GetCurrentPreset().GetPreResize().empty()) {
-		pCmdUI->Enable(FALSE);
-		pCmdUI->SetCheck (0);
-	} else {
-		pCmdUI->Enable(TRUE);
-		pCmdUI->SetCheck (m_bToggleShader);
-	}
-}
-
-void CMainFrame::OnUpdateShaderToggle2(CCmdUI* pCmdUI)
-{
-	CAppSettings& s = AfxGetAppSettings();
-
-	if (s.m_Shaders.GetCurrentPreset().GetPostResize().empty()) {
-		pCmdUI->Enable(FALSE);
-		pCmdUI->SetCheck(0);
-	} else {
-		pCmdUI->Enable(TRUE);
-		pCmdUI->SetCheck(m_bToggleShaderScreenSpace);
-	}
-}
-
-void CMainFrame::OnShaderToggle1()
-{
-	m_bToggleShader = !m_bToggleShader;
-    SetShaders(m_bToggleShader, m_bToggleShaderScreenSpace);
-    if (m_bToggleShader) {
-		m_OSD.DisplayMessage(OSD_TOPRIGHT, ResStr(IDS_PRESIZE_SHADERS_ENABLED));
-	} else {
-		m_OSD.DisplayMessage(OSD_TOPRIGHT, ResStr(IDS_PRESIZE_SHADERS_DISABLED));
-	}
-
-	if (m_graph.m_pCAP) {
-		RepaintVideo();
-	}
-}
-
-void CMainFrame::OnShaderToggle2()
-{
-	m_bToggleShaderScreenSpace = !m_bToggleShaderScreenSpace;
-    SetShaders(m_bToggleShader, m_bToggleShaderScreenSpace);
-    if (m_bToggleShaderScreenSpace) {
-        m_OSD.DisplayMessage(OSD_TOPRIGHT, ResStr(IDS_POSTSIZE_SHADERS_ENABLED));
-	} else {
-        m_OSD.DisplayMessage(OSD_TOPRIGHT, ResStr(IDS_POSTSIZE_SHADERS_DISABLED));
-	}
-
-	if (m_graph.m_pCAP) {
-		RepaintVideo();
-	}
-}
-
 void CMainFrame::OnD3DFullscreenToggle()
 {
     CAppSettings& s = AfxGetAppSettings();
@@ -7063,39 +6630,6 @@ void CMainFrame::OnUpdateViewNavigation(CCmdUI* pCmdUI)
 {
     pCmdUI->SetCheck(m_controls.ControlChecked(CMainFrameControls::Panel::NAVIGATION));
     pCmdUI->Enable(GetLoadState() == MLS::LOADED && GetPlaybackMode() == PM_DIGITAL_CAPTURE);
-}
-
-void CMainFrame::OnViewDebugShaders()
-{
-    auto& dlg = m_pDebugShaders;
-    if (dlg && !dlg->m_hWnd) {
-        // something has destroyed the dialog and we didn't know about it
-        dlg = nullptr;
-    }
-    if (!dlg) {
-        // dialog doesn't exist - create and show it
-        dlg = std::make_unique<CDebugShadersDlg>();
-        dlg->ShowWindow(SW_SHOW);
-    } else if (dlg->IsWindowVisible()) {
-        if (dlg->IsIconic()) {
-            // dialog is visible but iconic - restore it
-            VERIFY(dlg->ShowWindow(SW_RESTORE));
-        } else {
-            // dialog is visible and not iconic - destroy it
-            VERIFY(dlg->DestroyWindow());
-            ASSERT(!dlg->m_hWnd);
-            dlg = nullptr;
-        }
-    } else {
-        // dialog is not visible - show it
-        VERIFY(!dlg->ShowWindow(SW_SHOW));
-    }
-}
-
-void CMainFrame::OnUpdateViewDebugShaders(CCmdUI* pCmdUI)
-{
-    const auto& dlg = m_pDebugShaders;
-    pCmdUI->SetCheck(dlg && dlg->m_hWnd && dlg->IsWindowVisible());
 }
 
 void CMainFrame::OnViewColorControls()
@@ -8300,52 +7834,6 @@ void CMainFrame::OnPlayFilters(UINT nID)
 void CMainFrame::OnUpdatePlayFilters(CCmdUI* pCmdUI)
 {
     pCmdUI->Enable(!m_capture.m_fCapturing);
-}
-
-void CMainFrame::OnPlayShadersSelect()
-{
-    ShowOptions(IDD_PPAGESHADERS);
-}
-
-void CMainFrame::OnPlayShadersPresetNext()
-{
-    auto& s = AfxGetAppSettings();
-    if (s.m_Shaders.NextPreset()) {
-        CString name;
-        if (s.m_Shaders.GetCurrentPresetName(name)) {
-            CString msg;
-            msg.Format(IDS_OSD_SHADERS_PRESET, name.GetString());
-            m_OSD.DisplayMessage(OSD_TOPLEFT, msg);
-        }
-    }
-}
-
-void CMainFrame::OnPlayShadersPresetPrev()
-{
-    auto& s = AfxGetAppSettings();
-    if (s.m_Shaders.PrevPreset()) {
-        CString name;
-        if (s.m_Shaders.GetCurrentPresetName(name)) {
-            CString msg;
-            msg.Format(IDS_OSD_SHADERS_PRESET, name.GetString());
-            m_OSD.DisplayMessage(OSD_TOPLEFT, msg);
-        }
-    }
-}
-
-void CMainFrame::OnPlayShadersPresets(UINT nID)
-{
-    ASSERT((nID >= ID_SHADERS_PRESETS_START) && (nID <= ID_SHADERS_PRESETS_END));
-    auto& s = AfxGetAppSettings();
-    int num = (int)nID - ID_SHADERS_PRESETS_START;
-    auto presets = s.m_Shaders.GetPresets();
-    ASSERT(num < (int)presets.size());
-    for (const auto& pair : presets) {
-        if (num-- == 0) {
-            s.m_Shaders.SetCurrentPreset(pair.first);
-            break;
-        }
-    }
 }
 
 int CMainFrame::UpdateSelectedAudioStreamInfo(int index, AM_MEDIA_TYPE* pmt, LCID lcid) {
@@ -10744,266 +10232,6 @@ void CMainFrame::RepaintVideo(const bool bForceRepaint/* = false*/)
             }
         }
     }
-}
-
-ShaderC* CMainFrame::GetShader(CString path, bool bD3D11)
-{
-	ShaderC* pShader = nullptr;
-
-    CString shadersDir = ShaderList::GetShadersDir();
-    CString shadersDir11 = ShaderList::GetShadersDir11();
-    CString tPath = path;
-    tPath.Replace(shadersDir, shadersDir11);
-
-    //if the shader exists in the Shaders11 folder, use that one
-    if (bD3D11 && ::PathFileExistsW(tPath)) {
-        path = tPath;
-    }
-
-	for (auto& shader : m_ShaderCache) {
-		if (shader.Match(path, bD3D11)) {
-			pShader = &shader;
-			break;
-		}
-	}
-
-	if (!pShader) {
-		if (::PathFileExistsW(path)) {
-			CStdioFile file;
-			if (file.Open(path, CFile::modeRead | CFile::shareDenyWrite | CFile::typeText)) {
-				ShaderC shader;
-				shader.label = path;
-
-				CString str;
-				file.ReadString(str); // read first string
-				if (str.Left(25) == L"// $MinimumShaderProfile:") {
-					shader.profile = str.Mid(25).Trim(); // shader version property
-				} else {
-					file.SeekToBegin();
-				}
-
-                if (shader.profile == L"ps_4_0" && !bD3D11 || shader.profile == L"ps_5_0") {
-                    ASSERT(false);
-                    return nullptr;
-                } else if (bD3D11) {
-                    shader.profile = L"ps_4_0";
-                } else if (shader.profile == L"ps_3_sw") {
-					shader.profile = L"ps_3_0";
-				} else if (shader.profile != L"ps_2_0"
-						&& shader.profile != L"ps_2_a"
-						&& shader.profile != L"ps_2_b"
-						&& shader.profile != L"ps_3_0") {
-                    shader.profile = L"ps_3_0";
-				}
-
-				while (file.ReadString(str)) {
-					shader.srcdata += str + L"\n";
-				}
-
-				shader.length = file.GetLength();
-
-				FILETIME ftCreate, ftAccess, ftWrite;
-				if (GetFileTime(file.m_hFile, &ftCreate, &ftAccess, &ftWrite)) {
-					shader.ftwrite = ftWrite;
-				}
-
-				file.Close();
-
-				m_ShaderCache.push_back(shader);
-				pShader = &m_ShaderCache.back();
-			}
-		}
-	}
-
-	return pShader;
-}
-
-bool CMainFrame::SaveShaderFile(ShaderC* shader)
-{
-	CString path;
-	if (AfxGetMyApp()->GetAppSavePath(path)) {
-		path.AppendFormat(L"Shaders\\%s.hlsl", static_cast<LPCWSTR>(shader->label));
-
-		CStdioFile file;
-		if (file.Open(path, CFile::modeWrite  | CFile::shareExclusive | CFile::typeText)) {
-			file.SetLength(0);
-
-			CString str;
-			str.Format(L"// $MinimumShaderProfile: %s\n", static_cast<LPCWSTR>(shader->profile));
-			file.WriteString(static_cast<LPCWSTR>(str));
-
-			file.WriteString(static_cast<LPCWSTR>(shader->srcdata));
-			file.Close();
-
-			// delete out-of-date data from the cache
-			for (auto it = m_ShaderCache.begin(), end = m_ShaderCache.end(); it != end; ++it) {
-				if (it->Match(shader->label, false)) {
-					m_ShaderCache.erase(it);
-					break;
-				}
-			}
-
-			return true;
-		}
-	}
-	return false;
-}
-
-bool CMainFrame::DeleteShaderFile(LPCWSTR label)
-{
-	CString path;
-	if (AfxGetMyApp()->GetAppSavePath(path)) {
-		path.AppendFormat(L"Shaders\\%s.hlsl", label);
-
-		if (!::PathFileExistsW(path) || ::DeleteFileW(path)) {
-			// if the file is missing or deleted successfully, then remove it from the cache
-			for (auto it = m_ShaderCache.begin(), end = m_ShaderCache.end(); it != end; ++it) {
-				if (it->Match(label, false)) {
-					m_ShaderCache.erase(it);
-					return true;
-				}
-			}
-		}
-	}
-
-	return false;
-}
-
-void CMainFrame::TidyShaderCache()
-{
-	CString appsavepath;
-	if (!AfxGetMyApp()->GetAppSavePath(appsavepath)) {
-		return;
-	}
-
-	for (auto it = m_ShaderCache.cbegin(); it != m_ShaderCache.cend(); ) {
-		CString path(appsavepath);
-		path += L"Shaders\\";
-		path += (*it).label + L".hlsl";
-
-		CFile file;
-		if (file.Open(path, CFile::modeRead | CFile::modeCreate | CFile::shareDenyNone)) {
-			ULONGLONG length = file.GetLength();
-			FILETIME ftCreate = {}, ftAccess = {}, ftWrite = {};
-			GetFileTime(file.m_hFile, &ftCreate, &ftAccess, &ftWrite);
-
-			file.Close();
-
-			if ((*it).length == length && CompareFileTime(&(*it).ftwrite, &ftWrite) == 0) {
-				it++;
-				continue; // actual shader
-			}
-		}
-
-		m_ShaderCache.erase(it++); // outdated shader
-	}
-}
-
-void CMainFrame::SetShaders(bool bSetPreResize/* = true*/, bool bSetPostResize/* = true*/)
-{
-    if (GetLoadState() != MLS::LOADED) {
-        return;
-    }
-
-    const auto& s = AfxGetAppSettings();
-    bool preFailed = false, postFailed = false;
-
-    if (m_graph.m_pCAP3) { //interfaces for madVR and MPC-VR
-        TidyShaderCache();
-        const int PShaderMode = m_graph.m_pCAP3->GetPixelShaderMode();
-        if (PShaderMode != 9 && PShaderMode != 11) {
-            return;
-        }
-
-        m_graph.m_pCAP3->ClearPixelShaders(TARGET_FRAME);
-        m_graph.m_pCAP3->ClearPixelShaders(TARGET_SCREEN);
-        int shadercount = 0;
-        if (bSetPreResize) {
-            for (const auto& shader : s.m_Shaders.GetCurrentPreset().GetPreResize().ExpandMultiPassShaderList()) {
-                ShaderC* pShader = GetShader(shader.filePath, PShaderMode == 11);
-                if (pShader) {
-                    shadercount++;
-                    CStringW label;
-                    label.Format(L"Shader%d", shadercount);
-                    CStringA profile = pShader->profile;
-                    CStringA srcdata = pShader->srcdata;
-                    if (FAILED(m_graph.m_pCAP3->AddPixelShader(TARGET_FRAME, label, profile, srcdata))) {
-                        preFailed = true;
-                        m_graph.m_pCAP3->ClearPixelShaders(TARGET_FRAME);
-                        break;
-                    }
-                }
-            }
-        }
-        if (bSetPostResize) {
-            for (const auto& shader : s.m_Shaders.GetCurrentPreset().GetPostResize().ExpandMultiPassShaderList()) {
-                ShaderC* pShader = GetShader(shader.filePath, PShaderMode == 11);
-                if (pShader) {
-                    shadercount++;
-                    CStringW label;
-                    label.Format(L"Shader%d", shadercount);
-                    CStringA profile = pShader->profile;
-                    CStringA srcdata = pShader->srcdata;
-                    if (FAILED(m_graph.m_pCAP3->AddPixelShader(TARGET_SCREEN, label, profile, srcdata))) {
-                        postFailed = true;
-                        m_graph.m_pCAP3->ClearPixelShaders(TARGET_SCREEN);
-                        break;
-                    }
-                }
-            }
-        }
-    } else if (m_graph.m_pCAP2) {
-        // When pTarget parameter of ISubPicAllocatorPresenter2::SetPixelShader2() is nullptr,
-        // internal video renderers select maximum available profile and madVR (the only external renderer that
-        // supports shader part of ISubPicAllocatorPresenter2 interface) seems to ignore it altogether.
-        m_graph.m_pCAP2->SetPixelShader2(nullptr, nullptr, false);
-        if (bSetPreResize) {
-            for (const auto& shader : s.m_Shaders.GetCurrentPreset().GetPreResize().ExpandMultiPassShaderList()) {
-                if (FAILED(m_graph.m_pCAP2->SetPixelShader2(shader.GetCode(), nullptr, false))) {
-                    preFailed = true;
-                    m_graph.m_pCAP2->SetPixelShader2(nullptr, nullptr, false);
-                    break;
-                }
-            }
-        }
-        m_graph.m_pCAP2->SetPixelShader2(nullptr, nullptr, true);
-        if (bSetPostResize) {
-            for (const auto& shader : s.m_Shaders.GetCurrentPreset().GetPostResize().ExpandMultiPassShaderList()) {
-                if (FAILED(m_graph.m_pCAP2->SetPixelShader2(shader.GetCode(), nullptr, true))) {
-                    postFailed = true;
-                    m_graph.m_pCAP2->SetPixelShader2(nullptr, nullptr, true);
-                    break;
-                }
-            }
-        }
-    } else if (m_graph.m_pCAP) {
-        // shouldn't happen, all known renderers that support ISubPicAllocatorPresenter interface
-        // support ISubPicAllocatorPresenter2 as well, and it takes priority
-        ASSERT(FALSE);
-        m_graph.m_pCAP->SetPixelShader(nullptr, nullptr);
-        if (bSetPreResize) {
-            for (const auto& shader : s.m_Shaders.GetCurrentPreset().GetPreResize().ExpandMultiPassShaderList()) {
-                if (FAILED(m_graph.m_pCAP->SetPixelShader(shader.GetCode(), nullptr))) {
-                    preFailed = true;
-                    m_graph.m_pCAP->SetPixelShader(nullptr, nullptr);
-                    break;
-                }
-            }
-        }
-        postFailed = !s.m_Shaders.GetCurrentPreset().GetPostResize().empty();
-    }
-
-    CString errMsg;
-    if (preFailed && postFailed) {
-        VERIFY(errMsg.LoadString(IDS_MAINFRM_BOTH_SHADERS_FAILED));
-    } else if (preFailed) {
-        VERIFY(errMsg.LoadString(IDS_MAINFRM_PRE_SHADERS_FAILED));
-    } else if (postFailed) {
-        VERIFY(errMsg.LoadString(IDS_MAINFRM_POST_SHADERS_FAILED));
-    } else {
-        return;
-    }
-    SendStatusMessage(errMsg, 3000, true);
 }
 
 void CMainFrame::SetBalance(int balance)
@@ -14511,47 +13739,6 @@ CString CMainFrame::GetStreamOSDString(CString name, LCID lcid, DWORD dwSelGroup
     return strMessage;
 }
 
-bool CMainFrame::SetupShadersSubMenu()
-{
-    const auto& s = AfxGetAppSettings();
-
-    CMPCThemeMenu& subMenu = m_shadersMenu;
-    // Empty the menu
-    while (subMenu.RemoveMenu(0, MF_BYPOSITION));
-
-    if (!(s.iDSVideoRendererType == VIDRNDT_DS_EVR_CUSTOM || s.iDSVideoRendererType == VIDRNDT_DS_SYNC
-        || s.iDSVideoRendererType == VIDRNDT_DS_VMR9RENDERLESS || s.iDSVideoRendererType == VIDRNDT_DS_MADVR || s.iDSVideoRendererType == VIDRNDT_DS_MPCVR)) {
-        return false;
-    }        
-
-    subMenu.AppendMenu(MF_BYCOMMAND | MF_STRING | MF_ENABLED, ID_PRESIZE_SHADERS_TOGGLE, ResStr(IDS_PRESIZE_SHADERS_TOGGLE));
-    subMenu.AppendMenu(MF_BYCOMMAND | MF_STRING | MF_ENABLED, ID_POSTSIZE_SHADERS_TOGGLE, ResStr(IDS_POSTSIZE_SHADERS_TOGGLE));
-    VERIFY(subMenu.AppendMenu(MF_STRING | MF_ENABLED, ID_SHADERS_SELECT, ResStr(IDS_SHADERS_SELECT)));
-    VERIFY(subMenu.AppendMenu(MF_STRING | MF_ENABLED, ID_VIEW_DEBUGSHADERS, ResStr(IDS_SHADERS_DEBUG)));
-
-    auto presets = s.m_Shaders.GetPresets();
-    if (!presets.empty()) {
-        CString current;
-        bool selected = s.m_Shaders.GetCurrentPresetName(current);
-        VERIFY(subMenu.AppendMenu(MF_SEPARATOR));
-        UINT nID = ID_SHADERS_PRESETS_START;
-        for (const auto& pair : presets) {
-            if (nID > ID_SHADERS_PRESETS_END) {
-                // too many presets
-                ASSERT(FALSE);
-                break;
-            }
-            VERIFY(subMenu.AppendMenu(MF_STRING | MF_ENABLED, nID, SanitizeMenuLabel(pair.first)));
-            if (selected && pair.first == current) {
-                VERIFY(subMenu.CheckMenuRadioItem(nID, nID, nID, MF_BYCOMMAND));
-                selected = false;
-            }
-            nID++;
-        }
-    }
-    return true;
-}
-
 /////////////
 
 void CMainFrame::SetAlwaysOnTop(int iOnTop)
@@ -15064,14 +14251,14 @@ void CMainFrame::OpenCurPlaylistItem(REFERENCE_TIME rtStart, bool reopen /* = fa
         }
     }
 
-    if (pli.m_bYoutubeDL && (reopen || pli.m_fns.GetHead() == pli.m_ydlSourceURL && m_sydlLastProcessURL != pli.m_ydlSourceURL)) {
+    if (pli.m_bYoutubeDL && (reopen || pli.m_fns.GetHead() == pli.m_ydlSourceURL && m_cmdline.m_sydlLastProcessURL != pli.m_ydlSourceURL)) {
         if (DeferIfNested(DeferredActionType::Open, [this, rtStart, reopen, abRepeat] { OpenCurPlaylistItem(rtStart, reopen, abRepeat); })) {
             return;
         }
         if (!CloseMediaBeforeOpen()) {
             return;
         }
-        if (ProcessYoutubeDLURL(pli.m_ydlSourceURL, false, true)) {
+        if (m_cmdline.ProcessYoutubeDLURL(pli.m_ydlSourceURL, false, true)) {
             OpenCurPlaylistItem(rtStart, false, abRepeat);
             return;
         }
@@ -16981,12 +16168,12 @@ void CMainFrame::UpdateUILanguage()
     OpenSetupStatsBar();
 
     // Reload the debug shaders dialog if need be
-    if (m_pDebugShaders && IsWindow(m_pDebugShaders->m_hWnd)) {
-        BOOL bWasVisible = m_pDebugShaders->IsWindowVisible();
-        VERIFY(m_pDebugShaders->DestroyWindow());
-        m_pDebugShaders = std::make_unique<CDebugShadersDlg>();
+    if (m_shaders.m_pDebugShaders && IsWindow(m_shaders.m_pDebugShaders->m_hWnd)) {
+        BOOL bWasVisible = m_shaders.m_pDebugShaders->IsWindowVisible();
+        VERIFY(m_shaders.m_pDebugShaders->DestroyWindow());
+        m_shaders.m_pDebugShaders = std::make_unique<CDebugShadersDlg>();
         if (bWasVisible) {
-            m_pDebugShaders->ShowWindow(SW_SHOWNA);
+            m_shaders.m_pDebugShaders->ShowWindow(SW_SHOWNA);
             // Don't steal focus from main frame
             SetActiveWindow();
         }
@@ -17183,252 +16370,6 @@ LRESULT CMainFrame::OnLoadSubtitles(WPARAM wParam, LPARAM lParam)
 LRESULT CMainFrame::OnGetSubtitles(WPARAM wParam, LPARAM lParam)
 {
     return m_subs.OnGetSubtitles(wParam, lParam);
-}
-
-static const CString ydl_whitelist[] = {
-    _T("youtube.com/"),
-    _T("youtu.be/"),
-    _T("twitch.tv/"),
-    _T("twitch.com/"),
-    _T("instagram.com/"),
-    _T("facebook.com/"),
-    _T("tiktok.com/"),
-    _T("vimeo.com/"),
-    _T("dailymotion.com/"),
-    _T("crunchyroll.com/"),
-    _T("bbc.co.uk/"),
-    _T("pornhub.com/"),
-    _T("xvideos.com/"),
-    _T("xhamster.com/"),
-    _T("youporn.com/"),
-    _T("tnaflix.com/"),
-};
-
-static const CString ydl_blacklist[] = {
-    _T("googlevideo.com/videoplayback"), // already processed URL
-    _T("googlevideo.com/api/manifest"),
-    _T("@127.0.0.1:"), // local URL
-    _T("saunalahti.fi/")
-};
-
-bool CMainFrame::IsOnYDLWhitelist(CString url) {
-    for (int i = 0; i < _countof(ydl_whitelist); i++) {
-        if (url.Find(ydl_whitelist[i]) >= 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool CMainFrame::CanSendToYoutubeDL(const CString url)
-{
-    if (url.Left(4).MakeLower() == _T("http")) {
-        auto& s = AfxGetAppSettings();
-        if (!s.bUseYDL) {
-            return false;
-        }
-
-        // Blacklist: don't use for IP addresses
-        std::wcmatch regmatch;
-        std::wregex regexp(LR"(https?:\/\/(\d{1,3}\.){3}\d{1,3}.*)");
-        if (std::regex_match(url.GetString(), regmatch, regexp)) {
-            return false;
-        }
-
-        // Whitelist: popular supported sites
-        if (IsOnYDLWhitelist(url)) {
-            return true;
-        }
-
-        // Blacklist: unsupported sites where YDL causes an error or long delay
-        for (int i = 0; i < _countof(ydl_blacklist); i++) {
-            if (url.Find(ydl_blacklist[i], 7) > 0) {
-                return false;
-            }
-        }
-
-        // Blacklist: URL points to a file
-        CString baseurl;
-        int q = url.Find(_T('?'));
-        if (q > 0) {
-            baseurl = url.Left(q);
-        } else {
-            baseurl = url;
-            q = url.GetLength();
-        }
-        int p = baseurl.ReverseFind(_T('.'));
-        if (p > 0 && (q - p <= 6)) {
-            CString ext = baseurl.Mid(p);
-            if (ext == L".m3u8" || ext == L".mpd") {
-                return false;
-            }
-            if (s.m_Formats.FindExt(ext)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-    return false;
-}
-
-bool CMainFrame::ProcessYoutubeDLURL(CString url, bool append, bool replace)
-{
-    auto& s = AfxGetAppSettings();
-    CAtlList<CYoutubeDLInstance::YDLStreamURL> streams;
-    CAtlList<CString> filenames;
-    CYoutubeDLInstance ydl;
-    CYoutubeDLInstance::YDLPlaylistInfo listinfo;
-    CString useragent;
-
-    m_sydlLastProcessURL = url;
-
-    m_wndStatusBar.SetStatusMessage(ResStr(IDS_CONTROLS_YOUTUBEDL));
-
-    {
-        CDeferredActionScope actionScope(*this);
-        if (!ydl.Run(url)) {
-            return false;
-        }
-    }
-    if (!ydl.GetHttpStreams(streams, listinfo, useragent)) {
-        return false;
-    }
-
-    if (!append && !replace) {
-        m_wndPlaylistBar.Empty();
-    }
-
-    CString f_title;
-
-    for (unsigned int i = 0; i < streams.GetCount(); i++) {
-        auto stream = streams.GetAt(streams.FindIndex(i));
-        CString v_url = stream.video_url;
-        CString a_url = stream.audio_url;
-        filenames.RemoveAll();
-        if (!v_url.IsEmpty() && (!s.bYDLAudioOnly || a_url.IsEmpty())) {
-            filenames.AddTail(v_url);
-
-        }
-        if (!a_url.IsEmpty()) {
-            filenames.AddTail(a_url);
-        }
-        CString title = stream.title;
-        CString seasonid;
-        if (stream.season_number != -1) {
-            seasonid.Format(_T("S%02d"), stream.season_number);
-        }
-        CString episodeid;
-        if (stream.episode_number != -1) {
-            episodeid.Format(_T("E%02d"), stream.episode_number);
-        }
-        CString epiid;
-        if (!seasonid.IsEmpty() || !episodeid.IsEmpty()) {
-            epiid.Format(_T("%s%s. "), static_cast<LPCWSTR>(seasonid), static_cast<LPCWSTR>(episodeid));
-        }
-        CString season;
-        if (!stream.series.IsEmpty()) {
-            season = stream.series;
-            CString t(stream.season.Left(6));
-            if (!stream.season.IsEmpty() && (t.MakeLower() != _T("season") || stream.season_number == -1)) {
-                season += _T(" ") + stream.season;
-            }
-            season += _T(" - ");
-        }
-        else if (!stream.season.IsEmpty()) {
-            CString t(stream.season.Left(6));
-            if (t.MakeLower() != _T("season") || stream.season_number == -1) {
-                season = stream.season + _T(" - ");
-            }
-        }
-        title.Format(_T("%s%s%s"), static_cast<LPCWSTR>(epiid), static_cast<LPCWSTR>(season), static_cast<LPCWSTR>(title));
-        if (i == 0) f_title = title;
-
-        CString ydl_src = stream.webpage_url.IsEmpty() ? url : stream.webpage_url;
-        if (i == 0) m_sydlLastProcessURL = ydl_src;
-
-        int targetlen = title.GetLength() > 100 ? 50 : 150 - title.GetLength();
-        CString short_url = ShortenURL(ydl_src, targetlen, true);
-        
-        if (ydl_src == filenames.GetHead()) {
-            // Processed URL is same as input, can happen for DASH manifest files. Clear source URL to avoid reprocessing.
-            ydl_src = _T("");
-        }
-
-        if (replace) {
-            m_wndPlaylistBar.ReplaceCurrentItem(filenames, nullptr, title + " (" + short_url + ")", ydl_src, useragent, _T(""), &stream.subtitles);
-            break;
-        } else {
-            m_wndPlaylistBar.Append(filenames, false, nullptr, title + " (" + short_url + ")", ydl_src, useragent, _T(""), &stream.subtitles);
-        }
-    }
-
-    if (s.fKeepHistory) {
-        auto* mru = &s.MRU;
-        RecentFileEntry r;
-        mru->LoadMediaHistoryEntryFN(m_sydlLastProcessURL, r);
-        if (streams.GetCount() > 1) {
-            auto h = streams.GetHead();
-            if (!h.series.IsEmpty()) {
-                r.title = h.series;
-                if (!h.season.IsEmpty()) {
-                    r.title += _T(" - ") + h.season;
-                }
-            }
-            else if (!h.season.IsEmpty()) {
-                r.title = h.season;
-            }
-            else if (!listinfo.title.IsEmpty()) {
-                if (!listinfo.uploader.IsEmpty()) r.title.Format(_T("%s - %s"), static_cast<LPCWSTR>(listinfo.uploader), static_cast<LPCWSTR>(listinfo.title));
-                else r.title = listinfo.title;
-            }
-            else r.title = f_title;
-        }
-        else if (streams.GetCount() == 1) {
-            r.title = f_title;
-        }
-        mru->Add(r, false);
-    }
-
-    if (!append && (!replace || m_wndPlaylistBar.GetCount() == 0)) {
-        m_wndPlaylistBar.SetFirst();
-    }
-    return true;
-}
-
-bool CMainFrame::DownloadWithYoutubeDL(CString url, CString filename)
-{
-    PROCESS_INFORMATION proc_info;
-    STARTUPINFO startup_info;
-    const auto& s = AfxGetAppSettings();
-
-    bool ytdlp = true;
-    CString args = _T("\"") + GetYDLExePath(&ytdlp) + _T("\" --console-title \"") + url + _T("\"");
-    if (!s.sYDLCommandLine.IsEmpty()) {
-        args.Append(_T(" "));
-        args.Append(s.sYDLCommandLine);
-    }
-    if (s.bYDLAudioOnly && (s.sYDLCommandLine.Find(_T("-f ")) < 0)) {
-        args.Append(_T(" -f bestaudio"));
-    }
-    if (s.sYDLCommandLine.Find(_T("-o ")) < 0) {
-        args.Append(_T(" -o \"" + filename + "\""));
-    }
-
-    ZeroMemory(&proc_info, sizeof(PROCESS_INFORMATION));
-    ZeroMemory(&startup_info, sizeof(STARTUPINFO));
-    startup_info.cb = sizeof(STARTUPINFO);
-
-    if (!CreateProcess(NULL, args.GetBuffer(), NULL, NULL, false, 0,
-                       NULL, NULL, &startup_info, &proc_info)) {
-        AfxMessageBox(_T("An error occurred while attempting to run yt-dlp/youtube-dl"), MB_ICONERROR, 0);
-        return false;
-    }
-
-    CloseHandle(proc_info.hProcess);
-    CloseHandle(proc_info.hThread);
-
-    return true;
 }
 
 void CMainFrame::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)
