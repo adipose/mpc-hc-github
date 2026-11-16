@@ -457,6 +457,7 @@ HRESULT CBaseAP::CreateDXDevice(CString& _Error)
         if (hr == D3DERR_DEVICELOST || hr == D3DERR_DEVICEREMOVED || hr == D3DERR_DEVICEHUNG || hr == D3DERR_OUTOFVIDEOMEMORY) {
             m_pD3DDevEx.Release();
             m_pD3DDev.Release();
+            /*
             m_pD3DEx.Release();
             m_pD3D.Release();
             Direct3DCreate9Ex(D3D_SDK_VERSION, &m_pD3DEx);
@@ -465,7 +466,8 @@ HRESULT CBaseAP::CreateDXDevice(CString& _Error)
             } else {
                 return E_UNEXPECTED;
             }
-        } else if (FAILED(hr)) {
+            */
+        } else if (hr == S_PRESENT_MODE_CHANGED || FAILED(hr)) {
             m_pD3DDevEx.Release();
             m_pD3DDev.Release();
         }
@@ -2522,10 +2524,6 @@ STDMETHODIMP CBaseAP::SetPixelShader(LPCSTR pSrcData, LPCSTR pTarget)
 
 bool CBaseAP::InputPinIsHLGNow()
 {
-    if (m_nRenderState != Started && m_nRenderState != Paused) {
-        return false;
-    }
-
     CComPtr<IPin> pPin;
     CMediaType    mt;
     if (SUCCEEDED(m_pOuterEVR->FindPin(L"EVR Input0", &pPin)) && SUCCEEDED(pPin->ConnectionMediaType(&mt))) {
@@ -2543,10 +2541,6 @@ bool CBaseAP::InputPinIsHLGNow()
 
 bool CBaseAP::HLGToSDRActive()
 {
-    if (m_bHLGPinCheck) {
-        m_bHLGPinCheck = false;
-        m_bHLGInput = InputPinIsHLGNow();
-    }
     if (!m_bHLGInput || !GetRenderersSettings().m_AdvRendSets.bHLGToSDR
             || m_caps.PixelShaderVersion < D3DPS_VERSION(3, 0)) {
         return false;
@@ -3080,6 +3074,9 @@ STDMETHODIMP CSyncAP::ProcessMessage(MFVP_MESSAGE_TYPE eMessage, ULONG_PTR ulPar
             break;
 
         case MFVP_MESSAGE_INVALIDATEMEDIATYPE:
+            // Read the input pin here, where the EVR already holds its filter lock. The render
+            // thread must not: it would wait for that lock while the loop below waits for it.
+            m_bHLGInputPin = InputPinIsHLGNow();
             m_bPendingRenegotiate = true;
             while (m_bPendingRenegotiate) {
                 Sleep(1);
@@ -3153,8 +3150,7 @@ HRESULT CSyncAP::CreateOptimalOutputType(IMFMediaType* pMixerProposedType, IMFMe
     }
 
     // HLG input: converted to SDR from the very first frame (see HLGToSDR.h).
-    m_bHLGInput = MixerTypeIsHLG(pMixerInputType);
-    m_bHLGPinCheck = !m_bHLGInput;
+    m_bHLGInput = MixerTypeIsHLG(pMixerInputType) || m_bHLGInputPin;
 
     pOptimalMediaType->SetUINT32(MF_MT_PAN_SCAN_ENABLED, 0);
 
